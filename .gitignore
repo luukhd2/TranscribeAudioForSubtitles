@@ -1,3 +1,8 @@
+# ignore the (large) pretrained model files
+/main/model/*
+# ignore the temp folder which stores the chunks
+/main/temp/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
