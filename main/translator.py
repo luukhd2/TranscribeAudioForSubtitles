@@ -36,6 +36,16 @@ class HiddenPrints:
         sys.stdout = self._original_stdout
 
 
+def get_hardcoded_language_dict():
+    """
+
+    model names found here: https://huggingface.co/jonatasgrosman/wav2vec2-xls-r-1b-english
+    """
+    return {"EN":"jonatasgrosman/wav2vec2-xls-r-1b-english",
+            "RU":"jonatasgrosman/wav2vec2-large-xlsr-53-russian",
+            }
+
+
 def check_args(parsed_args):
     """
     """
@@ -141,20 +151,139 @@ def split_audio_file(save_dir, duration, chunk_length, search_length, loaded_aud
     return audio_paths
 
 
-def transcription_to_SRT_format():
+def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
     """
-    """ 
+
+    transcriptions: <list of dicts> transcriptions belonging to 1 audio file
+
+    """
+    def nested_save_word(word_dict, word_thresh, all_words):
+        """ Nested function (only accesable within this function)
+        Store the word if is not empty and it meets the word threshold requirements.
+        """
+        # if the word has letters
+        if len(word_dict['word']) > 0:
+            # if the word confidence meets the word confidence threshold
+            if sum(word_dict['confidences']) / len(word_dict['confidences']) > word_thresh:
+                # store the word
+                all_words.append(word_dict)
+
+    def nested_get_reset_word_dict():
+        """ Get a dictionary in which the info for 1 transcribed word will be stored.
+        """
+        return  {'word':"", 'start':None, 'end':None, 'confidences':list()}
+
+
+    all_words = list()
+    # for each transcription list (transcribed audio chunk)
+    for transcription in transcriptions:
+        sentence = transcription['transcription']
+        starts = transcription['start_timestamps']
+        ends = transcription['end_timestamps']
+        probs = transcription['probabilities']
+        
+        # initiate the empty word dict (info for 1 word)
+        word_dict = nested_get_reset_word_dict()
+
+        # for each predicted character (with any confidence level)    
+        for character, start, end, prob in zip(sentence, starts, ends, probs):
+            # if the word has no start yet, give it the current start
+            if word_dict['start'] is None:
+                word_dict['start'] = start
+
+            # if the predicted character was predicted with enough confidence
+            if prob >= char_thresh:
+                # if the character was a space (word separator)
+                if character == " ":
+                    # store the word
+                    word_dict['end'] = end
+                    nested_save_word(word_dict=word_dict, word_thresh=word_thresh, all_words=all_words)
+                    # reset the word
+                    word_dict = nested_get_reset_word_dict()
+                # extend the current word
+                else:
+                    word_dict['confidences'].append(prob)
+                    word_dict['word'] = f'{word_dict["word"]}{character}'
+
+        # store the last word
+        word_dict['end'] = end
+        nested_save_word(word_dict=word_dict, word_thresh=word_thresh, all_words=all_words)
+
+    return all_words
+
+
+def word_list_to_srt_string(all_transcribed_words, time_between_subtitles):
+    """
+
+    time_between_subtitles: <float> seconds between subtitles
+    used this definition of SRT file Structure: https://docs.fileformat.com/video/srt/
+    """
     
+    def nested_get_subtitle_string(subtitle_position, subtitle_words):
+        # add this subtitle to the full subtitle string
+        print(subtitle_position, end=' ')
+        for word_to_print in subtitle_words:
+            print(word_to_print['word'], end=' ')
+        print("")
+    
+    # check input
+    if len(all_transcribed_words) < 0:
+        print("\t[WARNING]: No words were predicted for this audio file. SRT file will be empty")
+        return ""
+    
+    # define vars
+    output = ""
+    subtitle_position=1
+    subtitle_words = list()
+
+    # for each predicted word
+    for word_index, word in enumerate(all_transcribed_words):
+        # skip the first word
+        if word_index < 1:
+            subtitle_words.append(word)
+            continue
+        # get the previous word
+        else:
+            previous_word = all_transcribed_words[word_index-1]
+        
+        # if the time between words is long enough to create a new subtitle
+        if abs(word['end'] - previous_word['end']) > time_between_subtitles:
+            # create a new subtitle
+            nested_get_subtitle_string(subtitle_position, subtitle_words)
+            # add the subtitle string to the full file
 
 
-def create_russian_subtitle_file(model_path, audio_input_path, subtitle_output_path, num_of_cores, certainty_threshold,
-                                 chunk_length=10, search_length=4, temporary_save_dir='./main/temp/',
-                                 required_sample_khz=16000, temp_reformatted_audio_path='./main/temp/temp_reformatted.wav',
-                                 model_name="jonatasgrosman/wav2vec2-large-xlsr-53-russian"):
+            # prepare variables for next subtitle
+            subtitle_position+=1
+            subtitle_words = list()
+            subtitle_words.append(word)
+        # else if the word is still close enough to the active subtitle / sentence
+        else:
+            subtitle_words.append(word)
+
+    # don't forget the last subtitle
+    if len(subtitle_words) > 0:
+        # create a new subtitle
+        nested_get_subtitle_string(subtitle_position, subtitle_words)
+        # add the subtitle string to the full file
+        print("WARNING"*20)
+
+    return output
+
+
+def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num_of_cores, word_certainty_threshold,
+                        character_certainty_threshold, time_between_subtitles, language,
+                        chunk_length=10, search_length=4, temporary_save_dir='./main/temp/',
+                        required_sample_khz=16000, temp_reformatted_audio_path='./main/temp/temp_reformatted.wav'):
     """
     """
     # ensure torch doesn't use up too much of the CPU
     torch.set_num_threads(num_of_cores)
+
+    # get the model name
+    model_name = get_hardcoded_language_dict()[language]
+    if model_path is None:
+        model_path = pathlib.Path(f"./main/model/{language}_pretrained_model.pth")
 
     # convert audio to .wav
     print(f"\t[INFO]: Converting input audio to .wav...")
@@ -183,11 +312,10 @@ def create_russian_subtitle_file(model_path, audio_input_path, subtitle_output_p
 
     print(f"\t[INFO]: Starting transcription...")
     transcriptions = model.transcribe(audio_paths)
-    for transcription in transcriptions:
-        print(transcription)
-        #print(transcription['transcription'])
-    
+
     print(f"\t[INFO]: Converting transcriptions into a subtitle file...")
+    word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold)
+    srt_string = word_list_to_srt_string(all_transcribed_words=word_list, time_between_subtitles=time_between_subtitles)
     print('done')
 
 
@@ -197,16 +325,21 @@ def run_main(parsed_args):
     audio_pathlib = parsed_args.Input
     output_path =  parsed_args.Output
     model_path = parsed_args.TrainedModelPath
-    thresh = parsed_args.CertaintyThreshold
+    language = parsed_args.Language
+    character_thresh = parsed_args.CharacterCertaintyThreshold
+    word_thresh = parsed_args.WordCertaintyThreshold
     num_of_cores = parsed_args.Cores
+    time_between_subtitles = parsed_args.TimeBetweenSubtitles
 
-    create_russian_subtitle_file(model_path=model_path, audio_input_path=audio_pathlib, num_of_cores=num_of_cores,
-                                 certainty_threshold=thresh, subtitle_output_path=output_path)
+    create_subtitle_file(model_path=model_path, audio_input_path=audio_pathlib, num_of_cores=num_of_cores,
+                         character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
+                         subtitle_output_path=output_path, time_between_subtitles=time_between_subtitles,
+                         language=language)
 
 
 # TODO:  create subtitle function, add autocorrect option, 
 # it is probably smart to use long silences (>1s) as 1 sentence.
-# add confidence threshold, setup as pip package, add live video processing
+# setup as pip package, add live video processing
 # the training data was very short (average length 5 - 10 secs, use this for transcription as well)
 #
 # https://stackoverflow.com/questions/72575721/how-to-get-letters-position-relative-to-audio-time-in-huggingsound --> how to interpret different timestamps
@@ -218,12 +351,18 @@ if __name__ == "__main__":
                         help='File path to the input .mp4, .mp3, or .wav file to which you want to add Russian subtitles.')
     PARSER.add_argument("--Output", required=False, type=pathlib.Path, default='./output.srt',
                         help='File path to where the output file with subtitles will be created. Default=./output.srt')
-    PARSER.add_argument("--TrainedModelPath", required=False, type=pathlib.Path, default='./main/model/pretrained_model.pth',
-                        help='File path to where the trained model will be downloaded to and/or loaded from. Default=./model/pretrained_model.pth')
-    PARSER.add_argument("--CertaintyThreshold", required=False, type=float, default=0.95,
+    PARSER.add_argument("--TrainedModelPath", required=False, type=pathlib.Path, default=None,
+                        help='File path to where the trained model will be downloaded to and/or loaded from. Default=./main/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth')
+    PARSER.add_argument("--Language", required=False, type=str, default="EN", 
+                        help='Language spoken in the audio file.')
+    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.5,
+                            help='???')
+    PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.5,
                             help='???')
     PARSER.add_argument("--Cores", required=False, type=int, default=4, 
-                            help='The amount of cores used to translate the audio. Default=6')
+                            help='The amount of cores used to translate the audio. Default=4')
+    PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=1500, 
+                            help='miliseconds')
     # check the user input
     check_args(PARSER.parse_args())
     # run the main commandline function
