@@ -58,17 +58,21 @@ def check_args(parsed_args):
     """
     # check input mp4 path
     input= parsed_args.Input
-    if not os.path.isfile(input):
-        raise ValueError("--Input does not exist or was not found", input)
-    if input.suffix.upper() not in (".MP4", ".WAV", '.MP3'):
-        print(f"\t[WARNING]:--Input does not have a recognized audio/video format. This may cause the script to fail.")
+    if input.is_dir():
+        print("[WARNING]: Specified path is a folder, will create output files for each folder")
+    else:
+        if not os.path.isfile(input):
+                raise ValueError("--Input does not exist or was not found", input)
+        if input.suffix.upper() not in (".MP4", ".WAV", '.MP3'):
+            print(f"\t[WARNING]:--Input does not have a recognized audio/video format. This may cause the script to fail.")
 
     # check output path
     output = parsed_args.Output
-    if os.path.exists(output):
-        raise ValueError("--Output already exists", output)
-    if output.suffix.upper() != ".SRT":
-        print(f"\t[WARNING]:--Output path does not have the .srt format. The output file will be written in the .srt format.")
+    if output is not None:
+        if os.path.exists(output):
+            raise ValueError("--Output already exists", output)
+        if output.suffix.upper() != ".SRT":
+            print(f"\t[WARNING]:--Output path does not have the .srt format. The output file will be written in the .srt format.")
 
 
 def input_to_wav(source_file, target_file):
@@ -325,6 +329,8 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
                         required_sample_khz=16000, temp_reformatted_audio_path='./main/temp/temp_reformatted.wav'):
     """
     """
+    print(f"[INFO]: Creating subtitles for file {audio_input_path}")
+
     # ensure torch doesn't use up too much of the CPU
     torch.set_num_threads(num_of_cores)
 
@@ -332,6 +338,10 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     model_name = get_hardcoded_language_dict()[language]
     if model_path is None:
         model_path = pathlib.Path(f"./main/model/{language}_pretrained_model.pth")
+
+    # if needed, make the output file name
+    if subtitle_output_path is None:
+        subtitle_output_path = f"{str(audio_input_path.resolve()).rpartition('.')[0]}_subtitle.srt"
 
     # convert audio to .wav
     print(f"\t[INFO]: Converting input audio to .wav...")
@@ -365,7 +375,7 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold)
     srt_string = word_list_to_srt_string(all_transcribed_words=word_list, time_between_subtitles=time_between_subtitles)
     
-    with open(subtitle_output_path, mode='w') as output_file:
+    with open(subtitle_output_path, mode='w', encoding='utf-8') as output_file:
         output_file.write(srt_string)
     print('\t[INFO]')
 
@@ -373,7 +383,7 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
 def run_main(parsed_args):
     """ Run main calls 
     """
-    audio_pathlib = parsed_args.Input
+    input_path = parsed_args.Input
     output_path =  parsed_args.Output
     model_path = parsed_args.TrainedModelPath
     language = parsed_args.Language
@@ -382,14 +392,27 @@ def run_main(parsed_args):
     num_of_cores = parsed_args.Cores
     time_between_subtitles = parsed_args.TimeBetweenSubtitles
 
-    create_subtitle_file(model_path=model_path, audio_input_path=audio_pathlib, num_of_cores=num_of_cores,
-                         character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
-                         subtitle_output_path=output_path, time_between_subtitles=time_between_subtitles,
-                         language=language)
-
+    if not input_path.is_dir():    
+        create_subtitle_file(model_path=model_path, audio_input_path=input_path, num_of_cores=num_of_cores,
+                            character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
+                            subtitle_output_path=output_path, time_between_subtitles=time_between_subtitles,
+                            language=language)
+    else:
+        # Iterate directory
+        for path in os.listdir(input_path):
+            # check if current path is a file
+            full_path = os.path.join(input_path, path)
+            if os.path.isfile(full_path):
+                file_prefix, _ , file_type = full_path.rpartition(".")
+                if file_type.upper() in ("MP3", "MP4", "WAV", "MOV", "AVI", "WMV"):
+                    create_subtitle_file(model_path=model_path, audio_input_path=pathlib.Path(full_path), num_of_cores=num_of_cores,
+                                        character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
+                                        subtitle_output_path=None, time_between_subtitles=time_between_subtitles,
+                                        language=language)
+        
 
 # TODO:  add autocorrect option, 
-# it is probably smart to use long silences (>1s) as 1 sentence.
+# add folder predict option
 # setup as pip package, add live video processing
 # the training data was very short (average length 5 - 10 secs, use this for transcription as well)
 #
@@ -400,8 +423,8 @@ if __name__ == "__main__":
     PARSER = argparse.ArgumentParser()
     PARSER.add_argument("--Input", required=True, type=pathlib.Path,
                         help='File path to the input .mp4, .mp3, or .wav file to which you want to add Russian subtitles.')
-    PARSER.add_argument("--Output", required=False, type=pathlib.Path, default='./output.srt',
-                        help='File path to where the output file with subtitles will be created. Default=./output.srt')
+    PARSER.add_argument("--Output", required=False, type=pathlib.Path, default=None,
+                        help='File path to where the output file with subtitles will be created. Default="AUDIO FILE NAME"_subtitles.srt')
     PARSER.add_argument("--TrainedModelPath", required=False, type=pathlib.Path, default=None,
                         help='File path to where the trained model will be downloaded to and/or loaded from. Default=./main/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth')
     PARSER.add_argument("--Language", required=False, type=str, default="EN", 
