@@ -43,6 +43,13 @@ def get_hardcoded_language_dict():
     """
     return {"EN":"jonatasgrosman/wav2vec2-xls-r-1b-english",
             "RU":"jonatasgrosman/wav2vec2-large-xlsr-53-russian",
+            "PT":"jonatasgrosman/wav2vec2-xls-r-1b-portuguese",
+            "FR":"jonatasgrosman/wav2vec2-xls-r-1b-french",
+            "NL":"jonatasgrosman/wav2vec2-xls-r-1b-dutch",
+            "ES":"jonatasgrosman/wav2vec2-xls-r-1b-spanish",
+            "DE":"jonatasgrosman/wav2vec2-xls-r-1b-german",
+            "PL":"jonatasgrosman/wav2vec2-xls-r-1b-polish",
+            "IT":"jonatasgrosman/wav2vec2-xls-r-1b-italian",
             }
 
 
@@ -175,6 +182,7 @@ def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
 
 
     all_words = list()
+    previous_milliseconds = 0
     # for each transcription list (transcribed audio chunk)
     for transcription in transcriptions:
         sentence = transcription['transcription']
@@ -189,14 +197,15 @@ def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
         for character, start, end, prob in zip(sentence, starts, ends, probs):
             # if the word has no start yet, give it the current start
             if word_dict['start'] is None:
-                word_dict['start'] = start
+                # keep track of the milliseconds over the full audio clip (including previous chunks)
+                word_dict['start'] = previous_milliseconds + start
 
             # if the predicted character was predicted with enough confidence
             if prob >= char_thresh:
                 # if the character was a space (word separator)
                 if character == " ":
                     # store the word
-                    word_dict['end'] = end
+                    word_dict['end'] = previous_milliseconds + end
                     nested_save_word(word_dict=word_dict, word_thresh=word_thresh, all_words=all_words)
                     # reset the word
                     word_dict = nested_get_reset_word_dict()
@@ -204,10 +213,13 @@ def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
                 else:
                     word_dict['confidences'].append(prob)
                     word_dict['word'] = f'{word_dict["word"]}{character}'
-
+        
         # store the last word
-        word_dict['end'] = end
+        word_dict['end'] = previous_milliseconds + end
         nested_save_word(word_dict=word_dict, word_thresh=word_thresh, all_words=all_words)
+
+        # keep track of the milliseconds over the full audio clip (including previous chunks)
+        previous_milliseconds += end
 
     return all_words
 
@@ -218,14 +230,50 @@ def word_list_to_srt_string(all_transcribed_words, time_between_subtitles):
     time_between_subtitles: <float> seconds between subtitles
     used this definition of SRT file Structure: https://docs.fileformat.com/video/srt/
     """
-    
-    def nested_get_subtitle_string(subtitle_position, subtitle_words):
-        # add this subtitle to the full subtitle string
-        print(subtitle_position, end=' ')
-        for word_to_print in subtitle_words:
-            print(word_to_print['word'], end=' ')
-        print("")
-    
+    def nested_milliseconds_to_srt_time(milliseconds):
+        """ millisecs to string in format hours:minutes:seconds,milliseconds
+        """
+        millis = int(milliseconds)
+        millis_str = str(millis%1000).zfill(4)[1:4]
+        seconds=(millis/1000)%60
+        seconds = str(int(seconds)).zfill(2)
+        minutes=(millis/(1000*60))%60
+        minutes = str(int(minutes)).zfill(2)
+        hours=(millis/(1000*60*60))%24
+        hours=str(int(hours)).zfill(2)
+
+        # format example: "00:05:15,300" = 5 minutes, 15 seconds, 300 milliseconds
+        return f"{hours}:{minutes}:{seconds},{millis_str}"
+
+
+    def nested_get_SRT_subtitle_string(subtitle_position, subtitle_words):
+        """ Transform the subtitle position and the list of subtitle words into a subtitle string with
+        the appropriate SRT format.
+        """
+        # 1) start with the position (an integer)
+        subtitle_string = f"{subtitle_position}\n"
+
+        # 2) calculate the subtitle appearance time (00:05:00,400 --> 00:05:15,300)
+        first_word = subtitle_words[0]
+        start_time = first_word['start']
+        start_time_str = nested_milliseconds_to_srt_time(start_time)
+        
+        last_word = subtitle_words[-1]
+        last_time = last_word['end']
+        last_time_str = nested_milliseconds_to_srt_time(last_time)
+
+        subtitle_string = f"{subtitle_string}{start_time_str} --> {last_time_str}\n"
+
+        # 3) add the actual words to the suttile
+        words_str = " ".join(word['word'] for word in subtitle_words)
+        words_str = words_str.capitalize()
+        subtitle_string = f"{subtitle_string}{words_str}\n"
+
+        # 4) add another blank line to indicate the end of the subtitle
+        subtitle_string = f"{subtitle_string}\n"
+        return subtitle_string
+
+
     # check input
     if len(all_transcribed_words) < 0:
         print("\t[WARNING]: No words were predicted for this audio file. SRT file will be empty")
@@ -249,9 +297,9 @@ def word_list_to_srt_string(all_transcribed_words, time_between_subtitles):
         # if the time between words is long enough to create a new subtitle
         if abs(word['end'] - previous_word['end']) > time_between_subtitles:
             # create a new subtitle
-            nested_get_subtitle_string(subtitle_position, subtitle_words)
+            subtitle_string = nested_get_SRT_subtitle_string(subtitle_position, subtitle_words)
             # add the subtitle string to the full file
-
+            output = f"{output}{subtitle_string}"
 
             # prepare variables for next subtitle
             subtitle_position+=1
@@ -264,9 +312,9 @@ def word_list_to_srt_string(all_transcribed_words, time_between_subtitles):
     # don't forget the last subtitle
     if len(subtitle_words) > 0:
         # create a new subtitle
-        nested_get_subtitle_string(subtitle_position, subtitle_words)
+        subtitle_string = nested_get_SRT_subtitle_string(subtitle_position, subtitle_words)
         # add the subtitle string to the full file
-        print("WARNING"*20)
+        output = f"{output}{subtitle_string}"
 
     return output
 
@@ -316,7 +364,10 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     print(f"\t[INFO]: Converting transcriptions into a subtitle file...")
     word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold)
     srt_string = word_list_to_srt_string(all_transcribed_words=word_list, time_between_subtitles=time_between_subtitles)
-    print('done')
+    
+    with open(subtitle_output_path, mode='w') as output_file:
+        output_file.write(srt_string)
+    print('\t[INFO]')
 
 
 def run_main(parsed_args):
@@ -337,7 +388,7 @@ def run_main(parsed_args):
                          language=language)
 
 
-# TODO:  create subtitle function, add autocorrect option, 
+# TODO:  add autocorrect option, 
 # it is probably smart to use long silences (>1s) as 1 sentence.
 # setup as pip package, add live video processing
 # the training data was very short (average length 5 - 10 secs, use this for transcription as well)
@@ -361,7 +412,7 @@ if __name__ == "__main__":
                             help='???')
     PARSER.add_argument("--Cores", required=False, type=int, default=4, 
                             help='The amount of cores used to translate the audio. Default=4')
-    PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=1500, 
+    PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=1000, 
                             help='miliseconds')
     # check the user input
     check_args(PARSER.parse_args())
