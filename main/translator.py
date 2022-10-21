@@ -109,6 +109,7 @@ def split_audio_file(save_dir, duration, chunk_length, search_length, loaded_aud
     chunks_saved = 0
     # store the audio chunk files made in a list to retain proper order
     audio_paths = list()
+    audio_file_durations = list()
 
     # estimate 'loudness' of the audio
     decibels = convert_librosa_audio_time_series_to_decibels(audio_time_series=loaded_audio_time_series)
@@ -135,6 +136,8 @@ def split_audio_file(save_dir, duration, chunk_length, search_length, loaded_aud
         # calculate the overall time values
         seconds_seen = seconds_seen + chunk_duration 
         remainder = duration - seconds_seen
+        # store the duration of this chunk
+        audio_file_durations.append(chunk_duration)
 
     # do the final split
     if remainder < chunk_length:
@@ -142,6 +145,9 @@ def split_audio_file(save_dir, duration, chunk_length, search_length, loaded_aud
         last_chunk_data = loaded_audio_time_series[round(seconds_seen*sample_rate) ::]
         soundfile.write(file=f'{save_dir}{chunks_saved}_chunk.wav', data=last_chunk_data, samplerate=sample_rate)
         audio_paths.append(f'{save_dir}{chunks_saved}_chunk.wav')
+        # store the duration of this chunk
+        audio_file_durations.append(remainder)
+
     else:
         # if the remaining audio is longer than 1 chunk, look for a split point in the centre of the remaining audio
         start_second_of_final_split_window = seconds_seen + remainder/2 - search_length/2
@@ -153,16 +159,21 @@ def split_audio_file(save_dir, duration, chunk_length, search_length, loaded_aud
         first_to_last_chunk_data = loaded_audio_time_series[round(seconds_seen*sample_rate) : int(final_split_second*sample_rate)]
         soundfile.write(file=f'{save_dir}{chunks_saved}_chunk.wav', data=first_to_last_chunk_data, samplerate=sample_rate)
         audio_paths.append(f'{save_dir}{chunks_saved}_chunk.wav')
+        first_to_last_chunk_length = final_split_second-seconds_seen
+        audio_file_durations.append(first_to_last_chunk_length)
+        seconds_seen = seconds_seen + first_to_last_chunk_length
+
         # last chunk
         chunks_saved += 1
         last_chunk_data = loaded_audio_time_series[round(final_split_second*sample_rate) ::]
         soundfile.write(file=f'{save_dir}{chunks_saved}_chunk.wav', data=last_chunk_data, samplerate=sample_rate)
         audio_paths.append(f'{save_dir}{chunks_saved}_chunk.wav')
+        audio_file_durations.append(duration-seconds_seen)
+    
+    return audio_paths, audio_file_durations
 
-    return audio_paths
 
-
-def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
+def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh, audio_file_durations):
     """
 
     transcriptions: <list of dicts> transcriptions belonging to 1 audio file
@@ -186,9 +197,21 @@ def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
 
 
     all_words = list()
-    previous_milliseconds = 0
+    
     # for each transcription list (transcribed audio chunk)
-    for transcription in transcriptions:
+    for transcription_index, transcription in enumerate(transcriptions):
+        # count the time before the current fragment
+        if transcription_index > 0:
+            previous_milliseconds += audio_file_durations[transcription_index-1]*1000
+        else:
+            previous_milliseconds = 0
+
+        # if the transcription has no predicted words
+        if transcription['transcription'] is None or transcription['start_timestamps'] is None \
+        or transcription['end_timestamps'] is None or transcription['probabilities'] is None:
+            continue
+            
+        # get transcription info
         sentence = transcription['transcription']
         starts = transcription['start_timestamps']
         ends = transcription['end_timestamps']
@@ -221,9 +244,6 @@ def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh):
         # store the last word
         word_dict['end'] = previous_milliseconds + end
         nested_save_word(word_dict=word_dict, word_thresh=word_thresh, all_words=all_words)
-
-        # keep track of the milliseconds over the full audio clip (including previous chunks)
-        previous_milliseconds += end
 
     return all_words
 
@@ -354,7 +374,8 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     
     # split long audio files into parts, so the memory max isnt reached
     print(f"\t[INFO]: Splitting input audio into max {chunk_length}s fragments to prevent memory overload...")
-    audio_paths = split_audio_file(save_dir=temporary_save_dir, duration=duration, chunk_length=chunk_length, search_length=search_length, 
+    
+    audio_paths, audio_file_durations = split_audio_file(save_dir=temporary_save_dir, duration=duration, chunk_length=chunk_length, search_length=search_length, 
                                    loaded_audio_time_series=loaded_audio_time_series, sample_rate=required_sample_khz)
 
     # load model (will automatically download if it does not exist)
@@ -372,17 +393,20 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     transcriptions = model.transcribe(audio_paths)
 
     print(f"\t[INFO]: Converting transcriptions into a subtitle file...")
-    word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold)
+    word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold, audio_file_durations=audio_file_durations)
+
     srt_string = word_list_to_srt_string(all_transcribed_words=word_list, time_between_subtitles=time_between_subtitles)
-    
+
     with open(subtitle_output_path, mode='w', encoding='utf-8') as output_file:
         output_file.write(srt_string)
-    print('\t[INFO]')
+    print('\t[INFO] done.')
 
 
 def run_main(parsed_args):
-    """ Run main calls 
+    """ Run main, call the subtitle creation function for either a folder or one specific file.
+    Only called when the user uses commandline args to start the function.
     """
+    # get arguments
     input_path = parsed_args.Input
     output_path =  parsed_args.Output
     model_path = parsed_args.TrainedModelPath
@@ -392,19 +416,23 @@ def run_main(parsed_args):
     num_of_cores = parsed_args.Cores
     time_between_subtitles = parsed_args.TimeBetweenSubtitles
 
-    if not input_path.is_dir():    
+    # if the path is not a directory, but to a specific file
+    if not input_path.is_dir():
+        # call the subtitle creation function once
         create_subtitle_file(model_path=model_path, audio_input_path=input_path, num_of_cores=num_of_cores,
                             character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
                             subtitle_output_path=output_path, time_between_subtitles=time_between_subtitles,
                             language=language)
+    # if the path leads to a directory
     else:
         # Iterate directory
         for path in os.listdir(input_path):
             # check if current path is a file
             full_path = os.path.join(input_path, path)
             if os.path.isfile(full_path):
+                # check the file meets one of the allowed input formats.
                 file_prefix, _ , file_type = full_path.rpartition(".")
-                if file_type.upper() in ("MP3", "MP4", "WAV", "MOV", "AVI", "WMV"):
+                if file_type.upper() in ("MP3", "MP4", "WAV"):
                     create_subtitle_file(model_path=model_path, audio_input_path=pathlib.Path(full_path), num_of_cores=num_of_cores,
                                         character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
                                         subtitle_output_path=None, time_between_subtitles=time_between_subtitles,
@@ -412,31 +440,27 @@ def run_main(parsed_args):
         
 
 # TODO:  add autocorrect option, 
-# add folder predict option
 # setup as pip package, add live video processing
 # the training data was very short (average length 5 - 10 secs, use this for transcription as well)
-#
-# https://stackoverflow.com/questions/72575721/how-to-get-letters-position-relative-to-audio-time-in-huggingsound --> how to interpret different timestamps
-# https://huggingface.co/blog/asr-chunking --> how to split audio into chunks
 if __name__ == "__main__":
     # define the user input
     PARSER = argparse.ArgumentParser()
     PARSER.add_argument("--Input", required=True, type=pathlib.Path,
                         help='File path to the input .mp4, .mp3, or .wav file to which you want to add Russian subtitles.')
     PARSER.add_argument("--Output", required=False, type=pathlib.Path, default=None,
-                        help='File path to where the output file with subtitles will be created. Default="AUDIO FILE NAME"_subtitles.srt')
+                        help='File path to where the output file with subtitles will be created. Default="AUDIO FILE NAME"_subtitles.srt.')
     PARSER.add_argument("--TrainedModelPath", required=False, type=pathlib.Path, default=None,
-                        help='File path to where the trained model will be downloaded to and/or loaded from. Default=./main/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth')
+                        help='File path to where the trained model will be downloaded to and/or loaded from. Default=./main/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth.')
     PARSER.add_argument("--Language", required=False, type=str, default="EN", 
-                        help='Language spoken in the audio file.')
-    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.5,
-                            help='???')
+                        help='Language spoken in the audio file. Use the two letter code for the language (default="EN").')
+    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.7,
+                            help='How certain the model must be to include a character prediction (default=0.7), range=0-1.')
     PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.5,
-                            help='???')
+                            help='How certain the model must be to include a word prediction (default=0.5), range=0-1.')
     PARSER.add_argument("--Cores", required=False, type=int, default=4, 
-                            help='The amount of cores used to translate the audio. Default=4')
+                            help='The amount of cores used to translate the audio. Default=4.')
     PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=1000, 
-                            help='miliseconds')
+                            help='Time in miliseconds between words that will cause a subtitle split. Decrease if subtitles are too long (default=1000).')
     # check the user input
     check_args(PARSER.parse_args())
     # run the main commandline function
