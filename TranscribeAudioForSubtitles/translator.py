@@ -41,15 +41,18 @@ def get_hardcoded_language_dict():
 
     model names found here: https://huggingface.co/jonatasgrosman/wav2vec2-xls-r-1b-english
     """
-    return {"EN":"jonatasgrosman/wav2vec2-xls-r-1b-english",
+    return {"EN":"jonatasgrosman/wav2vec2-large-xlsr-53-english",
             "RU":"jonatasgrosman/wav2vec2-large-xlsr-53-russian",
-            "PT":"jonatasgrosman/wav2vec2-xls-r-1b-portuguese",
-            "FR":"jonatasgrosman/wav2vec2-xls-r-1b-french",
-            "NL":"jonatasgrosman/wav2vec2-xls-r-1b-dutch",
-            "ES":"jonatasgrosman/wav2vec2-xls-r-1b-spanish",
-            "DE":"jonatasgrosman/wav2vec2-xls-r-1b-german",
-            "PL":"jonatasgrosman/wav2vec2-xls-r-1b-polish",
-            "IT":"jonatasgrosman/wav2vec2-xls-r-1b-italian",
+            "PT":"jonatasgrosman/wav2vec2-large-xlsr-53-portuguese",
+            "FR":"jonatasgrosman/wav2vec2-large-xlsr-53-french",
+            "NL":"jonatasgrosman/wav2vec2-large-xlsr-53-dutch",
+            "ES":"jonatasgrosman/wav2vec2-large-xlsr-53-spanish",
+            "DE":"jonatasgrosman/wav2vec2-large-xlsr-53-german",
+            "PL":"jonatasgrosman/wav2vec2-large-xlsr-53-polish",
+            "IT":"jonatasgrosman/wav2vec2-large-xlsr-53-italian",
+            "JP":"jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+            "FN":"jonatasgrosman/wav2vec2-large-xlsr-53-finnish",
+            "GR":"jonatasgrosman/wav2vec2-large-xlsr-53-greek",
             }
 
 
