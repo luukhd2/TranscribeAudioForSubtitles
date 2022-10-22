@@ -1,7 +1,7 @@
 # ignore the (large) pretrained model files
-/main/model/*
+/TranscribeAudioForSubtitles/model/*
 # ignore the temp folder which stores the chunks
-/main/temp/*
+/TranscribeAudioForSubtitles/temp/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
