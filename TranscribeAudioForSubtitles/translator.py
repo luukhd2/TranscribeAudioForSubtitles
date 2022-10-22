@@ -345,8 +345,8 @@ def word_list_to_srt_string(all_transcribed_words, time_between_subtitles):
 
 def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num_of_cores, word_certainty_threshold,
                         character_certainty_threshold, time_between_subtitles, language,
-                        chunk_length=10, search_length=4, temporary_save_dir='./main/temp/',
-                        required_sample_khz=16000, temp_reformatted_audio_path='./main/temp/temp_reformatted.wav'):
+                        chunk_length=10, search_length=4, temporary_save_dir='./TranscribeAudioForSubtitles/temp/',
+                        required_sample_khz=16000, temp_reformatted_audio_path='./TranscribeAudioForSubtitles/temp/temp_reformatted.wav'):
     """
     """
     print(f"[INFO]: Creating subtitles for file {audio_input_path}")
@@ -450,13 +450,13 @@ if __name__ == "__main__":
     PARSER.add_argument("--Output", required=False, type=pathlib.Path, default=None,
                         help='File path to where the output file with subtitles will be created. Default="AUDIO FILE NAME"_subtitles.srt.')
     PARSER.add_argument("--TrainedModelPath", required=False, type=pathlib.Path, default=None,
-                        help='File path to where the trained model will be downloaded to and/or loaded from. Default=./main/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth.')
+                        help='File path to where the trained model will be downloaded to and/or loaded from. Default=./TranscribeAudioForSubtitles/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth.')
     PARSER.add_argument("--Language", required=False, type=str, default="EN", 
                         help='Language spoken in the audio file. Use the two letter code for the language (default="EN").')
-    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.7,
-                            help='How certain the model must be to include a character prediction (default=0.7), range=0-1.')
-    PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.5,
-                            help='How certain the model must be to include a word prediction (default=0.5), range=0-1.')
+    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.75,
+                            help='How certain the model must be to include a character prediction (default=0.75), range=0-1.')
+    PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.75,
+                            help='How certain the model must be to include a word prediction (default=0.75), range=0-1.')
     PARSER.add_argument("--Cores", required=False, type=int, default=4, 
                             help='The amount of cores used to translate the audio. Default=4.')
     PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=1000, 
