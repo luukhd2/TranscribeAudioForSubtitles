@@ -464,8 +464,8 @@ if __name__ == "__main__":
                         help='File path to where the trained model will be downloaded to and/or loaded from. Default=./TranscribeAudioForSubtitles/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth.')
     PARSER.add_argument("--Language", required=False, type=str, default="EN", 
                         help='Language spoken in the audio file. Use the two letter code for the language (default="EN").')
-    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.75,
-                            help='How certain the model must be to include a character prediction (default=0.75), range=0-1.')
+    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.70,
+                            help='How certain the model must be to include a character prediction (default=0.70), range=0-1.')
     PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.75,
                             help='How certain the model must be to include a word prediction (default=0.75), range=0-1.')
     PARSER.add_argument("--Cores", required=False, type=int, default=4, 
