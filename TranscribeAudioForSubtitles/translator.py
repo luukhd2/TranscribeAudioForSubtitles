@@ -351,13 +351,13 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     """
     print(f"[INFO]: Creating subtitles for file {audio_input_path}")
 
-    # ensure torch doesn't use up too much of the CPU
+    # ensure torch doesn't use up too much
     torch.set_num_threads(num_of_cores)
 
     # get the model name
     model_name = get_hardcoded_language_dict()[language]
     if model_path is None:
-        model_path = pathlib.Path(f"./main/model/{language}_pretrained_model.pth")
+        model_path = pathlib.Path(f"{temporary_save_dir}{language}_pretrained_model.pth")
 
     # if needed, make the output file name
     if subtitle_output_path is None:
@@ -388,6 +388,15 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     else:
         # loading the model in the bad (non state_dict) way because how huggingface models are setup
         model = torch.load(model_path)
+
+    # load model to gpu or cpu, depending on which is available
+    
+    # load model on gpu if available
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        torch.cuda.set_device(device)
+        model = model.cuda()
+    
 
     print(f"\t[INFO]: Starting transcription...")
     transcriptions = model.transcribe(audio_paths)
