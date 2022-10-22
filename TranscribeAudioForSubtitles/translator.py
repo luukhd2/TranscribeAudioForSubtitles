@@ -393,6 +393,9 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     # load model on gpu if available
     if torch.cuda.is_available():
         model.device = 'cuda'
+        # reload the model so the device is defined everywhere
+        model._load_model()
+
 
     print(f"\t[INFO]: Starting transcription...")
     transcriptions = model.transcribe(audio_paths)
