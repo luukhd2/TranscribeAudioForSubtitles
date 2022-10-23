@@ -398,7 +398,9 @@ def get_autocorrected_word_list(word_list, language):
     checker = SpellChecker(language=language.lower(), distance=3)
     new_word_list = copy.deepcopy(word_list)
     for word in new_word_list:
-        word['word'] = checker.correction(word['word'])
+        correction = checker.correction(word['word'])
+        if correction is not None:
+            word['word'] = correction
     
     return new_word_list
 
