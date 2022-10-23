@@ -514,7 +514,7 @@ def run_main(parsed_args):
                     create_subtitle_file(model_path=model_path, audio_input_path=pathlib.Path(full_path), num_of_cores=num_of_cores,
                                         character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
                                         subtitle_output_path=None, time_between_subtitles=time_between_subtitles,
-                                        language=language)
+                                        language=language, use_autocorrect=use_autocorrect, separate_voice=separate_voice)
         
 
 # TODO:  add autocorrect option, 
