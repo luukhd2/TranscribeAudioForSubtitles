@@ -8,6 +8,7 @@ import argparse
 import pathlib
 # check paths and files exist
 import os, sys
+import copy
 
 # custom modules:
 import numpy as np 
@@ -22,6 +23,8 @@ from huggingsound import SpeechRecognitionModel
 # convert any audio input to mp4
 from moviepy.editor import AudioFileClip
 from matplotlib import pyplot as plt
+# use autocorrect to fix spelling mistakes
+from spellchecker import SpellChecker
 
 
 class HiddenPrints:
@@ -76,6 +79,11 @@ def check_args(parsed_args):
             raise ValueError("--Output already exists", output)
         if output.suffix.upper() != ".SRT":
             print(f"\t[WARNING]:--Output path does not have the .srt format. The output file will be written in the .srt format.")
+
+    use_autocorrect = parsed_args.Autocorrect
+    if use_autocorrect:
+        if parsed_args.Language not in ("EN", "PL", "TU", "RU", "UA", "CZ", "PT", "GR", "IT", "FR", "ES", "VN"):
+            raise ValueError(f"The specified language, {parsed_args.Language}, is not supported for using autocorrect. Turn the --AutoCorrect feature off")
 
 
 def input_to_wav(source_file, target_file):
@@ -231,7 +239,7 @@ def get_word_list_from_transcriptions(transcriptions, word_thresh, char_thresh, 
                 word_dict['start'] = previous_milliseconds + start
 
             # if the predicted character was predicted with enough confidence
-            if prob >= char_thresh:
+            if prob >= char_thresh or character == " " and prob > char_thresh / 2:
                 # if the character was a space (word separator)
                 if character == " ":
                     # store the word
@@ -346,8 +354,58 @@ def word_list_to_srt_string(all_transcribed_words, time_between_subtitles):
     return output
 
 
+def audio_input_to_wav(temp_reformatted_audio_path, required_sample_khz, use_vocal_separation):
+    """
+    
+    Voice extraction taken from:
+    https://stackoverflow.com/questions/49279425/extract-human-vocals-from-song
+    """
+    # load audio through librosa
+    loaded_audio_time_series, sample_rate = librosa.load(path=temp_reformatted_audio_path, sr=required_sample_khz)
+    duration = librosa.get_duration(y=loaded_audio_time_series, sr=sample_rate)
+    # return the loaded audio
+    if not use_vocal_separation:
+        return loaded_audio_time_series, sample_rate, duration
+
+    # except if the voices must be filtered out from all audio
+    else:
+        S_full, phase = librosa.magphase(librosa.stft(loaded_audio_time_series))
+        S_filter = librosa.decompose.nn_filter(S_full,
+                                       aggregate=np.median,
+                                       metric='cosine',
+                                       width=int(librosa.time_to_frames(3, sr=sample_rate)))
+        S_filter = np.minimum(S_full, S_filter)
+        margin_v = 4 # 4 was 10, made less extreme
+        power = 1 # was 2, but turned audio too 'robotic' which worsened performance
+
+        mask_v = librosa.util.softmask(S_full - S_filter,
+                                       margin_v * S_filter,
+                                       power=power)
+        # Once we have the masks, simply multiply them with the input spectrum
+        # to separate the components
+        S_foreground = mask_v * S_full
+
+        new_y = librosa.istft(S_foreground*phase)
+        return new_y, sample_rate, duration
+
+
+def get_autocorrected_word_list(word_list, language):
+    """
+    """       
+    #calculating the hamming distances and similarities for each word of the sentence
+    #with each of the chosen keywords contained in list
+    
+    checker = SpellChecker(language=language.lower(), distance=3)
+    new_word_list = copy.deepcopy(word_list)
+    for word in new_word_list:
+        word['word'] = checker.correction(word['word'])
+    
+    return new_word_list
+
+
 def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num_of_cores, word_certainty_threshold,
-                        character_certainty_threshold, time_between_subtitles, language,
+                        character_certainty_threshold, time_between_subtitles, language, use_autocorrect,
+                        separate_voice,
                         chunk_length=10, search_length=4, temporary_save_dir='./TranscribeAudioForSubtitles/temp/',
                         required_sample_khz=16000, temp_reformatted_audio_path='./TranscribeAudioForSubtitles/temp/temp_reformatted.wav'):
     """
@@ -372,9 +430,11 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
 
     # load audio input
     print(f"\t[INFO]: Loading .wav and converting to sample rate {required_sample_khz} kHz ...")
-    loaded_audio_time_series, sample_rate = librosa.load(path=temp_reformatted_audio_path, sr=required_sample_khz)
-    duration = librosa.get_duration(y=loaded_audio_time_series, sr=sample_rate)
-    
+    if separate_voice:
+        print(f"\t\t[INFO]: Extracting only voices from background noise...")
+    loaded_audio_time_series, sample_rate, duration = audio_input_to_wav(temp_reformatted_audio_path=temp_reformatted_audio_path,
+                                                                        required_sample_khz=required_sample_khz, use_vocal_separation=separate_voice)
+
     # split long audio files into parts, so the memory max isnt reached
     print(f"\t[INFO]: Splitting input audio into max {chunk_length}s fragments to prevent memory overload...")
     
@@ -406,6 +466,10 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     print(f"\t[INFO]: Converting transcriptions into a subtitle file...")
     word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold, audio_file_durations=audio_file_durations)
 
+    if use_autocorrect:
+        print(f"\t\t[INFO]: Autocorrecting words for spelling mistakes...")
+        word_list = get_autocorrected_word_list(word_list, language)
+
     srt_string = word_list_to_srt_string(all_transcribed_words=word_list, time_between_subtitles=time_between_subtitles)
 
     with open(subtitle_output_path, mode='w', encoding='utf-8') as output_file:
@@ -426,6 +490,8 @@ def run_main(parsed_args):
     word_thresh = parsed_args.WordCertaintyThreshold
     num_of_cores = parsed_args.Cores
     time_between_subtitles = parsed_args.TimeBetweenSubtitles
+    use_autocorrect = parsed_args.Autocorrect
+    separate_voice = parsed_args.SeparateVoice
 
     # if the path is not a directory, but to a specific file
     if not input_path.is_dir():
@@ -433,7 +499,7 @@ def run_main(parsed_args):
         create_subtitle_file(model_path=model_path, audio_input_path=input_path, num_of_cores=num_of_cores,
                             character_certainty_threshold=character_thresh, word_certainty_threshold=word_thresh, 
                             subtitle_output_path=output_path, time_between_subtitles=time_between_subtitles,
-                            language=language)
+                            language=language, use_autocorrect=use_autocorrect, separate_voice=separate_voice)
     # if the path leads to a directory
     else:
         # Iterate directory
@@ -464,14 +530,18 @@ if __name__ == "__main__":
                         help='File path to where the trained model will be downloaded to and/or loaded from. Default=./TranscribeAudioForSubtitles/model/"TWO_LETTER_LANGUAGE NAME"_pretrained_model.pth.')
     PARSER.add_argument("--Language", required=False, type=str, default="EN", 
                         help='Language spoken in the audio file. Use the two letter code for the language (default="EN").')
-    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.70,
+    PARSER.add_argument("--CharacterCertaintyThreshold", required=False, type=float, default=0.5,
                             help='How certain the model must be to include a character prediction (default=0.70), range=0-1.')
-    PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.75,
+    PARSER.add_argument("--WordCertaintyThreshold", required=False, type=float, default=0.5,
                             help='How certain the model must be to include a word prediction (default=0.75), range=0-1.')
     PARSER.add_argument("--Cores", required=False, type=int, default=4, 
                             help='The amount of cores used to translate the audio. Default=4.')
-    PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=1000, 
-                            help='Time in miliseconds between words that will cause a subtitle split. Decrease if subtitles are too long (default=1000).')
+    PARSER.add_argument("--Autocorrect", required=False, type=bool, default=False, 
+                            help='Use autocorrect to fix spelling mistakes in transcription. (True or False)')
+    PARSER.add_argument("--SeparateVoice", required=False, type=bool, default=False, 
+                            help='Process input audio for voice separation (True or False)')
+    PARSER.add_argument("--TimeBetweenSubtitles", required=False, type=int, default=800, 
+                            help='Time in miliseconds between words that will cause a subtitle split. Decrease if subtitles are too long (default=800).')
     # check the user input
     check_args(PARSER.parse_args())
     # run the main commandline function
