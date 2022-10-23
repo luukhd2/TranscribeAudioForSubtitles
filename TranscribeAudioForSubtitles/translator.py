@@ -441,27 +441,28 @@ def create_subtitle_file(model_path, audio_input_path, subtitle_output_path, num
     audio_paths, audio_file_durations = split_audio_file(save_dir=temporary_save_dir, duration=duration, chunk_length=chunk_length, search_length=search_length, 
                                    loaded_audio_time_series=loaded_audio_time_series, sample_rate=required_sample_khz)
 
-    # load model (will automatically download if it does not exist)
-    print(f"\t[INFO]: Loading model...")
-    if not os.path.exists(model_path):
-        print(f'\t\t[INFO]: The model was not found at the specified path. Downloading and saving...')
-        model = SpeechRecognitionModel(model_name)
-        # saving the model in the bad (non-state_dict) way because how huggingface models are setup
-        torch.save(model, str(model_path.resolve()))
-    else:
-        # loading the model in the bad (non state_dict) way because how huggingface models are setup
-        model = torch.load(model_path)
+    # anything to do with the model will use no grad (no weight updates == evaluation)
+    with torch.no_grad():
+        # load model (will automatically download if it does not exist)
+        print(f"\t[INFO]: Loading model...")
+        if not os.path.exists(model_path):
+            print(f'\t\t[INFO]: The model was not found at the specified path. Downloading and saving...')
+            model = SpeechRecognitionModel(model_name)
+            # saving the model in the bad (non-state_dict) way because how huggingface models are setup
+            torch.save(model, str(model_path.resolve()))
+        else:
+            # loading the model in the bad (non state_dict) way because how huggingface models are setup
+            model = torch.load(model_path)
 
-    # load model to gpu or cpu, depending on which is available
-    # load model on gpu if available
-    if torch.cuda.is_available():
-        model.device = 'cuda'
-        # reload the model so the device is defined everywhere
-        model._load_model()
+        # load model to gpu or cpu, depending on which is available
+        # load model on gpu if available
+        if torch.cuda.is_available():
+            model.device = 'cuda'
+            # reload the model so the device is defined everywhere
+            model._load_model()
 
-
-    print(f"\t[INFO]: Starting transcription...")
-    transcriptions = model.transcribe(audio_paths)
+        print(f"\t[INFO]: Starting transcription...")
+        transcriptions = model.transcribe(audio_paths)
 
     print(f"\t[INFO]: Converting transcriptions into a subtitle file...")
     word_list = get_word_list_from_transcriptions(transcriptions, word_certainty_threshold, character_certainty_threshold, audio_file_durations=audio_file_durations)
