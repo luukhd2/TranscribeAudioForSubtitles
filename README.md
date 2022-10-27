@@ -8,5 +8,5 @@ EN, RU, PT, FR, NL, ES, DE, PL, IT, JP, FN, GR
 
 
 
-![Example](TranscriptionFirstExample.png)
+![Example](TranscriptionFirstExampleFixed.png)
 
