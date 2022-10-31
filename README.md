@@ -12,3 +12,4 @@ EN, RU, PT, FR, NL, ES, DE, PL, IT, JP, FN, GR
 
 
 (Repo is operational, but still being worked on 27-10-2022)
+Currently, generating captions for a 25 mins video takes ~3 mins when using a GPU.
