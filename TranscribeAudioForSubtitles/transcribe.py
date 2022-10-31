@@ -1,5 +1,8 @@
-"""
-
+""" The main function of this repository.
+    Can be run in commandline to specify an input audio file and language.
+    
+    Example:
+    python ./TranscribeAudioForSubtitles/transcribe.py --Input "./TranscribeAudioForSubtitles/input/EN_pale_blue_dot_example.wav" --Language "EN" 
 """
 # standard library:
 # allow user input arguments
@@ -186,12 +189,9 @@ def run_main(parsed_args):
                                         subtitle_output_path=None, time_between_subtitles=time_between_subtitles,
                                         language=language, use_autocorrect=use_autocorrect, separate_voice=separate_voice,
                                         subtitle_format=subtitle_format)
-        
+    
 
-# TODO:  add  https://en.wikipedia.org/wiki/Timed_Text_Markup_Language  this as a subtitle option for fokin chromecast
-# Web Video Text Tracks, CEA-608/708
-# setup as pip package, add live video processing
-# the training data was very short (average length 5 - 10 secs, use this for transcription as well)
+# TODO: setup as pip package, add live video processing. Try and find better speech extraction methods.
 if __name__ == "__main__":
     # define the user input
     PARSER = argparse.ArgumentParser()
