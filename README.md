@@ -5,7 +5,8 @@ How to use the code:
 
 ![Example](TranscriptionFirstExampleFixed.png)
 
-You can generate captions for other audio files by changing the --Input path and using other languages by changing the --Language.
+You can generate captions for other audio files by changing the --Input path and use other languages by changing the --Language.
+
 Currently supported languages:
 EN, RU, PT, FR, NL, ES, DE, PL, IT, JP, FN, GR
 
